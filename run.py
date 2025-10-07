@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 import random
 import time
 import threading
+import pprint
 
 class WirelessSimulatorApp:
     def __init__(self, master):
@@ -41,7 +42,7 @@ class WirelessSimulatorApp:
         self.bands_entry = ttk.Entry(form, width=10)
         self.bands_entry.grid(row=1, column=1, pady=5)
 
-        ttk.Label(form, text="Number of Time Steps (1–20):").grid(row=2, column=0, sticky="e", pady=5, padx=5)
+        ttk.Label(form, text="Number of Time Steps:").grid(row=2, column=0, sticky="e", pady=5, padx=5)
         self.time_entry = ttk.Entry(form, width=10)
         self.time_entry.grid(row=2, column=1, pady=5)
 
@@ -70,7 +71,7 @@ class WirelessSimulatorApp:
         self.jammed_bands_entry.grid(row=0, column=1, pady=5)
         self.jammed_bands_entry.insert(0, "1")
 
-        ttk.Label(self.jammer_frame, text="Impacted Time Steps (1-20):").grid(row=1, column=0, sticky="e", pady=5, padx=5)
+        ttk.Label(self.jammer_frame, text="Impacted Time Steps:").grid(row=1, column=0, sticky="e", pady=5, padx=5)
         self.jammed_times_entry = ttk.Entry(self.jammer_frame, width=10)
         self.jammed_times_entry.grid(row=1, column=1, pady=5)
         self.jammed_times_entry.insert(0, "1")
@@ -100,14 +101,10 @@ class WirelessSimulatorApp:
             self.num_agents = int(self.agents_entry.get())
             self.num_bands = int(self.bands_entry.get())
             self.time_steps = int(self.time_entry.get())
-            if not (1 <= self.num_agents <= 10 and 1 <= self.num_bands <= 10 and 1 <= self.time_steps <= 20):
+            if not (1 <= self.num_agents <= 10 and 1 <= self.num_bands <= 10):
                 raise ValueError
         except ValueError:
             messagebox.showerror("Input Error", "Please enter valid integer values within the specified ranges.")
-            return
-
-        if self.num_agents > self.num_bands:
-            messagebox.showerror("Input Error", "Number of agents must be less than or equal to the number of bands.")
             return
 
         self.selected_algo = self.algo_var.get()
@@ -146,6 +143,7 @@ class WirelessSimulatorApp:
         self.t = 0
         self.occupancy = [[[[] for _ in range(self.num_bands)] for _ in range(self.time_steps)]]
         self.colors = [["#FFFFFF" for _ in range(self.time_steps)] for _ in range(self.num_bands)]
+        self.agent_success = [0] * self.num_agents
 
         # Pre-set jammed cells
         for band, ts in self.jammed_set:
@@ -153,6 +151,9 @@ class WirelessSimulatorApp:
 
         for widget in self.master.winfo_children():
             widget.destroy()
+
+        # Enlarge the window for the simulation UI
+        self.master.geometry("1600x900")
 
         self.create_sim_ui()
 
@@ -162,7 +163,7 @@ class WirelessSimulatorApp:
 
         ttk.Label(top, text="Dynamic Wireless Allocation Simulation", style="Header.TLabel").pack()
 
-        self.canvas = tk.Canvas(self.master, width=800, height=350, bg="white", highlightthickness=1, highlightbackground="#666")
+        self.canvas = tk.Canvas(self.master, width=1400, height=600, bg="white", highlightthickness=1, highlightbackground="#666")
         self.canvas.pack(pady=10)
 
         control_frame = ttk.Frame(self.master)
@@ -180,8 +181,8 @@ class WirelessSimulatorApp:
         self.stats_label = ttk.Label(self.master, text="", font=("Segoe UI", 12))
         self.stats_label.pack(pady=10)
 
-        self.cell_size_x = 700 / self.time_steps
-        self.cell_size_y = 300 / self.num_bands
+        self.cell_size_x = 1300 / self.time_steps
+        self.cell_size_y = 550 / self.num_bands
         self.draw_grid()
 
     def draw_grid(self):
@@ -213,7 +214,7 @@ class WirelessSimulatorApp:
                         font_size = 11 if len(agent_str) < 10 else 9
                         self.canvas.create_text(mid_x, mid_y, text=agent_str, fill=text_color, font=("Segoe UI", font_size, "bold"))
 
-        self.canvas.create_text(400, 15, text=f"Time Step: {self.t}/{self.time_steps}", font=("Segoe UI", 12, "bold"))
+        self.canvas.create_text(700, 15, text=f"Time Step: {self.t}/{self.time_steps}", font=("Segoe UI", 12, "bold"))
 
     def next_step(self):
         if self.t >= self.time_steps:
@@ -250,10 +251,12 @@ class WirelessSimulatorApp:
                 elif count == 1:
                     self.colors[b][self.t] = "#00C853"  # bright green (success)
                     self.successful += 1
+                    agent = agents[0] - 1
+                    self.agent_success[agent] += 1
                 else:
                     self.colors[b][self.t] = "#D50000"  # bright red (collision)
                     self.collisions += 1
-
+        pprint.pprint(self.occupancy)
         self.t += 1
         self.draw_grid()
 
@@ -264,12 +267,20 @@ class WirelessSimulatorApp:
         pass
 
     def finish_simulation(self):
-        total = self.time_steps * self.num_bands
-        throughput = self.successful / total if total > 0 else 0
-        self.stats_label.config(
-            text=f"✅ Simulation Complete\nCollisions: {self.collisions}   "
-                 f"Successful: {self.successful}   Throughput: {throughput:.2f} ({self.successful}/{total})"
-        )
+        total_slots = self.time_steps * self.num_bands
+        overall_throughput = self.successful / total_slots if total_slots > 0 else 0
+        agent_throughputs = [s / self.time_steps if self.time_steps > 0 else 0 for s in self.agent_success]
+        sum_x = sum(agent_throughputs)
+        sum_x2 = sum(x ** 2 for x in agent_throughputs)
+        jain_fairness = (sum_x ** 2) / (self.num_agents * sum_x2) if sum_x2 > 0 else 0
+
+        text = f"✅ Simulation Complete\n"
+        text += f"Collisions: {self.collisions}   Successful: {self.successful}   Overall Throughput: {overall_throughput:.2f} ({self.successful}/{total_slots})\n"
+        text += "Agent Throughputs: "
+        for i, tp in enumerate(agent_throughputs, 1):
+            text += f"Agent{i}: {tp:.2f} "
+        text += f"\nJain's Fairness: {jain_fairness:.2f}"
+        self.stats_label.config(text=text)
         self.play_button.config(state="disabled")
         self.next_button.config(state="disabled")
 
@@ -284,7 +295,6 @@ class WirelessSimulatorApp:
 
     def auto_run(self):
         while self.running and self.t < self.time_steps:
-            time.sleep(1)
             self.master.after(0, self.next_step)
         if self.t >= self.time_steps:
             self.running = False
