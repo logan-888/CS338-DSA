@@ -1,0 +1,296 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import random
+import time
+import threading
+
+class WirelessSimulatorApp:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Dynamic Wireless Allocation Simulator")
+        self.master.geometry("950x600")
+        self.master.configure(bg="#f4f4f4")
+        self.font_main = ("Segoe UI", 11)
+        self.running = False
+
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TButton", font=("Segoe UI", 11, "bold"), padding=6)
+        style.configure("TLabel", font=self.font_main, background="#f4f4f4")
+        style.configure("Header.TLabel", font=("Segoe UI", 16, "bold"), background="#f4f4f4")
+
+        self.create_input_ui()
+
+    def create_input_ui(self):
+        for widget in self.master.winfo_children():
+            widget.destroy()
+
+        frame = ttk.Frame(self.master, padding=20)
+        frame.pack(expand=True)
+
+        ttk.Label(frame, text="Dynamic Wireless Allocation Simulator", style="Header.TLabel").pack(pady=15)
+
+        form = ttk.Frame(frame)
+        form.pack(pady=10)
+
+        ttk.Label(form, text="Number of Agents (1–10):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
+        self.agents_entry = ttk.Entry(form, width=10)
+        self.agents_entry.grid(row=0, column=1, pady=5)
+
+        ttk.Label(form, text="Number of Bands (1–10):").grid(row=1, column=0, sticky="e", pady=5, padx=5)
+        self.bands_entry = ttk.Entry(form, width=10)
+        self.bands_entry.grid(row=1, column=1, pady=5)
+
+        ttk.Label(form, text="Number of Time Steps (1–20):").grid(row=2, column=0, sticky="e", pady=5, padx=5)
+        self.time_entry = ttk.Entry(form, width=10)
+        self.time_entry.grid(row=2, column=1, pady=5)
+
+        ttk.Label(form, text="Algorithm:").grid(row=3, column=0, sticky="e", pady=5, padx=5)
+        self.algo_var = tk.StringVar(value="Random")
+        self.algo_combo = ttk.Combobox(form, textvariable=self.algo_var, values=["Random", "ML approach", "RL approach"], state="readonly")
+        self.algo_combo.grid(row=3, column=1, pady=5)
+
+        self.random_var = tk.BooleanVar(value=False)
+        self.random_check = ttk.Checkbutton(form, text="Enable Random Transmission", variable=self.random_var, command=self.toggle_prob_ui)
+        self.random_check.grid(row=4, column=0, columnspan=2, sticky="w", pady=5, padx=5)
+
+        self.prob_frame = ttk.Frame(form)
+        ttk.Label(self.prob_frame, text="Transmission Probability (%, 0-100):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
+        self.prob_entry = ttk.Entry(self.prob_frame, width=10)
+        self.prob_entry.grid(row=0, column=1, pady=5)
+        self.prob_entry.insert(0, "50")
+
+        self.jammer_var = tk.BooleanVar(value=False)
+        self.jammer_check = ttk.Checkbutton(form, text="Enable Laser Jammer", variable=self.jammer_var, command=self.toggle_jammer_ui)
+        self.jammer_check.grid(row=6, column=0, columnspan=2, sticky="w", pady=5, padx=5)
+
+        self.jammer_frame = ttk.Frame(form)
+        ttk.Label(self.jammer_frame, text="Impacted Bands (1-10):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
+        self.jammed_bands_entry = ttk.Entry(self.jammer_frame, width=10)
+        self.jammed_bands_entry.grid(row=0, column=1, pady=5)
+        self.jammed_bands_entry.insert(0, "1")
+
+        ttk.Label(self.jammer_frame, text="Impacted Time Steps (1-20):").grid(row=1, column=0, sticky="e", pady=5, padx=5)
+        self.jammed_times_entry = ttk.Entry(self.jammer_frame, width=10)
+        self.jammed_times_entry.grid(row=1, column=1, pady=5)
+        self.jammed_times_entry.insert(0, "1")
+
+        self.jammer_frame.grid_remove()
+
+        # Initial UI states
+        self.toggle_prob_ui()
+        self.toggle_jammer_ui()
+
+        ttk.Button(frame, text="Start Simulation", command=self.start_simulation).pack(pady=15)
+
+    def toggle_prob_ui(self):
+        if self.random_var.get():
+            self.prob_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=5)
+        else:
+            self.prob_frame.grid_remove()
+
+    def toggle_jammer_ui(self):
+        if self.jammer_var.get():
+            self.jammer_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=5)
+        else:
+            self.jammer_frame.grid_remove()
+
+    def start_simulation(self):
+        try:
+            self.num_agents = int(self.agents_entry.get())
+            self.num_bands = int(self.bands_entry.get())
+            self.time_steps = int(self.time_entry.get())
+            if not (1 <= self.num_agents <= 10 and 1 <= self.num_bands <= 10 and 1 <= self.time_steps <= 20):
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Input Error", "Please enter valid integer values within the specified ranges.")
+            return
+
+        if self.num_agents > self.num_bands:
+            messagebox.showerror("Input Error", "Number of agents must be less than or equal to the number of bands.")
+            return
+
+        self.selected_algo = self.algo_var.get()
+
+        self.random_transmission = self.random_var.get()
+
+        if self.random_transmission:
+            try:
+                prob = int(self.prob_entry.get())
+                if not 0 <= prob <= 100:
+                    raise ValueError
+                self.trans_prob = prob / 100.0
+            except ValueError:
+                messagebox.showerror("Input Error", "Transmission probability must be an integer between 0 and 100.")
+                return
+        else:
+            self.trans_prob = 1.0  # always transmit if not random
+
+        self.enable_jammer = self.jammer_var.get()
+        self.jammed_set = set()
+        if self.enable_jammer:
+            try:
+                num_jb = int(self.jammed_bands_entry.get())
+                num_jt = int(self.jammed_times_entry.get())
+                if not (1 <= num_jb <= self.num_bands and 1 <= num_jt <= self.time_steps):
+                    raise ValueError("Impacted values out of range.")
+                jammed_bands_list = random.sample(range(self.num_bands), num_jb)
+                jammed_times_list = random.sample(range(self.time_steps), num_jt)
+                self.jammed_set = {(band, ts) for band in jammed_bands_list for ts in jammed_times_list}
+            except ValueError as e:
+                messagebox.showerror("Input Error", str(e) if "out of range" in str(e) else "Invalid impacted values.")
+                return
+
+        self.collisions = 0
+        self.successful = 0
+        self.t = 0
+        self.occupancy = [[[[] for _ in range(self.num_bands)] for _ in range(self.time_steps)]]
+        self.colors = [["#FFFFFF" for _ in range(self.time_steps)] for _ in range(self.num_bands)]
+
+        # Pre-set jammed cells
+        for band, ts in self.jammed_set:
+            self.colors[band][ts] = "#D50000"
+
+        for widget in self.master.winfo_children():
+            widget.destroy()
+
+        self.create_sim_ui()
+
+    def create_sim_ui(self):
+        top = ttk.Frame(self.master)
+        top.pack(pady=10)
+
+        ttk.Label(top, text="Dynamic Wireless Allocation Simulation", style="Header.TLabel").pack()
+
+        self.canvas = tk.Canvas(self.master, width=800, height=350, bg="white", highlightthickness=1, highlightbackground="#666")
+        self.canvas.pack(pady=10)
+
+        control_frame = ttk.Frame(self.master)
+        control_frame.pack(pady=5)
+
+        self.next_button = ttk.Button(control_frame, text="Next Step", command=self.next_step)
+        self.next_button.grid(row=0, column=0, padx=5)
+
+        self.play_button = ttk.Button(control_frame, text="▶ Auto Run", command=self.toggle_run)
+        self.play_button.grid(row=0, column=1, padx=5)
+
+        self.reset_button = ttk.Button(control_frame, text="↻ Restart", command=self.create_input_ui)
+        self.reset_button.grid(row=0, column=2, padx=5)
+
+        self.stats_label = ttk.Label(self.master, text="", font=("Segoe UI", 12))
+        self.stats_label.pack(pady=10)
+
+        self.cell_size_x = 700 / self.time_steps
+        self.cell_size_y = 300 / self.num_bands
+        self.draw_grid()
+
+    def draw_grid(self):
+        self.canvas.delete("all")
+        for i in range(self.num_bands):
+            for j in range(self.time_steps):
+                x0 = 50 + j * self.cell_size_x
+                y0 = 30 + i * self.cell_size_y
+                x1 = x0 + self.cell_size_x
+                y1 = y0 + self.cell_size_y
+                color = self.colors[i][j]
+                self.canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="#333", width=1.8)
+
+                mid_x = (x0 + x1) / 2
+                mid_y = (y0 + y1) / 2
+                agents = self.occupancy[0][j][i]
+                agent_str = ",".join(map(str, agents)) if agents else ""
+                is_jammed = (i, j) in self.jammed_set
+
+                if is_jammed:
+                    if agents:
+                        self.canvas.create_text(mid_x, mid_y - 6, text="JAMMED", fill="white", font=("Segoe UI", 10, "bold"))
+                        self.canvas.create_text(mid_x, mid_y + 6, text=agent_str, fill="white", font=("Segoe UI", 8))
+                    else:
+                        self.canvas.create_text(mid_x, mid_y, text="JAMMED", fill="white", font=("Segoe UI", 11, "bold"))
+                else:
+                    if agents:
+                        text_color = "white" if color == "#D50000" else "black"
+                        font_size = 11 if len(agent_str) < 10 else 9
+                        self.canvas.create_text(mid_x, mid_y, text=agent_str, fill=text_color, font=("Segoe UI", font_size, "bold"))
+
+        self.canvas.create_text(400, 15, text=f"Time Step: {self.t}/{self.time_steps}", font=("Segoe UI", 12, "bold"))
+
+    def next_step(self):
+        if self.t >= self.time_steps:
+            self.finish_simulation()
+            return
+
+        # Agent transmissions based on selected algorithm
+        if self.selected_algo == "Random":
+            if self.random_transmission:
+                for agent in range(self.num_agents):
+                    if random.random() < self.trans_prob:
+                        band = random.randint(0, self.num_bands - 1)
+                        self.occupancy[0][self.t][band].append(agent + 1)
+            else:
+                for agent in range(self.num_agents):
+                    band = random.randint(0, self.num_bands - 1)
+                    self.occupancy[0][self.t][band].append(agent + 1)
+        elif self.selected_algo == "ML approach":
+            self.ml_approach()
+        elif self.selected_algo == "RL approach":
+            self.rl_approach()
+
+        for b in range(self.num_bands):
+            agents = self.occupancy[0][self.t][b]
+            count = len(agents)
+            is_jammed = (b, self.t) in self.jammed_set
+            if is_jammed:
+                self.colors[b][self.t] = "#D50000"
+                if count > 0:
+                    self.collisions += 1
+            else:
+                if count == 0:
+                    self.colors[b][self.t] = "#FFD600"  # yellow (empty)
+                elif count == 1:
+                    self.colors[b][self.t] = "#00C853"  # bright green (success)
+                    self.successful += 1
+                else:
+                    self.colors[b][self.t] = "#D50000"  # bright red (collision)
+                    self.collisions += 1
+
+        self.t += 1
+        self.draw_grid()
+
+    def ml_approach(self):
+        pass
+
+    def rl_approach(self):
+        pass
+
+    def finish_simulation(self):
+        total = self.time_steps * self.num_bands
+        throughput = self.successful / total if total > 0 else 0
+        self.stats_label.config(
+            text=f"✅ Simulation Complete\nCollisions: {self.collisions}   "
+                 f"Successful: {self.successful}   Throughput: {throughput:.2f} ({self.successful}/{total})"
+        )
+        self.play_button.config(state="disabled")
+        self.next_button.config(state="disabled")
+
+    def toggle_run(self):
+        if not self.running:
+            self.running = True
+            self.play_button.config(text="⏸ Pause")
+            threading.Thread(target=self.auto_run, daemon=True).start()
+        else:
+            self.running = False
+            self.play_button.config(text="▶ Auto Run")
+
+    def auto_run(self):
+        while self.running and self.t < self.time_steps:
+            time.sleep(1)
+            self.master.after(0, self.next_step)
+        if self.t >= self.time_steps:
+            self.running = False
+            self.master.after(0, lambda: self.play_button.config(text="▶ Auto Run"))
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    WirelessSimulatorApp(root)
+    root.mainloop()
