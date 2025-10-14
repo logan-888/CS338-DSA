@@ -4,6 +4,11 @@ import random
 import time
 import threading
 import pprint
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
+
+from dsa_env import DSAEnvironment
 
 class WirelessSimulatorApp:
     def __init__(self, master):
@@ -48,7 +53,7 @@ class WirelessSimulatorApp:
 
         ttk.Label(form, text="Algorithm:").grid(row=3, column=0, sticky="e", pady=5, padx=5)
         self.algo_var = tk.StringVar(value="Random")
-        self.algo_combo = ttk.Combobox(form, textvariable=self.algo_var, values=["Random", "ML approach", "RL approach"], state="readonly")
+        self.algo_combo = ttk.Combobox(form, textvariable=self.algo_var, values=["Random", "RL approach"], state="readonly")
         self.algo_combo.grid(row=3, column=1, pady=5)
 
         self.random_var = tk.BooleanVar(value=False)
@@ -56,31 +61,13 @@ class WirelessSimulatorApp:
         self.random_check.grid(row=4, column=0, columnspan=2, sticky="w", pady=5, padx=5)
 
         self.prob_frame = ttk.Frame(form)
-        ttk.Label(self.prob_frame, text="Transmission Probability (%, 0-100):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
+        ttk.Label(self.prob_frame, text="Transmission Probability (0-1):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
         self.prob_entry = ttk.Entry(self.prob_frame, width=10)
         self.prob_entry.grid(row=0, column=1, pady=5)
         self.prob_entry.insert(0, "50")
 
-        self.jammer_var = tk.BooleanVar(value=False)
-        self.jammer_check = ttk.Checkbutton(form, text="Enable Laser Jammer", variable=self.jammer_var, command=self.toggle_jammer_ui)
-        self.jammer_check.grid(row=6, column=0, columnspan=2, sticky="w", pady=5, padx=5)
-
-        self.jammer_frame = ttk.Frame(form)
-        ttk.Label(self.jammer_frame, text="Impacted Bands (1-10):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
-        self.jammed_bands_entry = ttk.Entry(self.jammer_frame, width=10)
-        self.jammed_bands_entry.grid(row=0, column=1, pady=5)
-        self.jammed_bands_entry.insert(0, "1")
-
-        ttk.Label(self.jammer_frame, text="Impacted Time Steps:").grid(row=1, column=0, sticky="e", pady=5, padx=5)
-        self.jammed_times_entry = ttk.Entry(self.jammer_frame, width=10)
-        self.jammed_times_entry.grid(row=1, column=1, pady=5)
-        self.jammed_times_entry.insert(0, "1")
-
-        self.jammer_frame.grid_remove()
-
         # Initial UI states
         self.toggle_prob_ui()
-        self.toggle_jammer_ui()
 
         ttk.Button(frame, text="Start Simulation", command=self.start_simulation).pack(pady=15)
 
@@ -89,12 +76,6 @@ class WirelessSimulatorApp:
             self.prob_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=5)
         else:
             self.prob_frame.grid_remove()
-
-    def toggle_jammer_ui(self):
-        if self.jammer_var.get():
-            self.jammer_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=5)
-        else:
-            self.jammer_frame.grid_remove()
 
     def start_simulation(self):
         try:
@@ -113,30 +94,16 @@ class WirelessSimulatorApp:
 
         if self.random_transmission:
             try:
-                prob = int(self.prob_entry.get())
-                if not 0 <= prob <= 100:
+                prob = float(self.prob_entry.get())
+                if not 0 <= prob <= 1:
                     raise ValueError
-                self.trans_prob = prob / 100.0
+                self.trans_prob = prob
             except ValueError:
-                messagebox.showerror("Input Error", "Transmission probability must be an integer between 0 and 100.")
+                messagebox.showerror("Input Error", "Transmission probability must be between 0 and 1.")
                 return
         else:
-            self.trans_prob = 1.0  # always transmit if not random
+            self.trans_prob = 1.0  # always transmit if not random     
 
-        self.enable_jammer = self.jammer_var.get()
-        self.jammed_set = set()
-        if self.enable_jammer:
-            try:
-                num_jb = int(self.jammed_bands_entry.get())
-                num_jt = int(self.jammed_times_entry.get())
-                if not (1 <= num_jb <= self.num_bands and 1 <= num_jt <= self.time_steps):
-                    raise ValueError("Impacted values out of range.")
-                jammed_bands_list = random.sample(range(self.num_bands), num_jb)
-                jammed_times_list = random.sample(range(self.time_steps), num_jt)
-                self.jammed_set = {(band, ts) for band in jammed_bands_list for ts in jammed_times_list}
-            except ValueError as e:
-                messagebox.showerror("Input Error", str(e) if "out of range" in str(e) else "Invalid impacted values.")
-                return
 
         self.collisions = 0
         self.successful = 0
@@ -145,9 +112,8 @@ class WirelessSimulatorApp:
         self.colors = [["#FFFFFF" for _ in range(self.time_steps)] for _ in range(self.num_bands)]
         self.agent_success = [0] * self.num_agents
 
-        # Pre-set jammed cells
-        for band, ts in self.jammed_set:
-            self.colors[band][ts] = "#D50000"
+
+        self.env = DSAEnvironment(self.num_agents, self.num_bands, self.trans_prob)
 
         for widget in self.master.winfo_children():
             widget.destroy()
@@ -200,21 +166,16 @@ class WirelessSimulatorApp:
                 mid_y = (y0 + y1) / 2
                 agents = self.occupancy[0][j][i]
                 agent_str = ",".join(map(str, agents)) if agents else ""
-                is_jammed = (i, j) in self.jammed_set
 
-                if is_jammed:
-                    if agents:
-                        self.canvas.create_text(mid_x, mid_y - 6, text="JAMMED", fill="white", font=("Segoe UI", 10, "bold"))
-                        self.canvas.create_text(mid_x, mid_y + 6, text=agent_str, fill="white", font=("Segoe UI", 8))
-                    else:
-                        self.canvas.create_text(mid_x, mid_y, text="JAMMED", fill="white", font=("Segoe UI", 11, "bold"))
-                else:
-                    if agents:
-                        text_color = "white" if color == "#D50000" else "black"
-                        font_size = 11 if len(agent_str) < 10 else 9
-                        self.canvas.create_text(mid_x, mid_y, text=agent_str, fill=text_color, font=("Segoe UI", font_size, "bold"))
+                
+                if agents:
+                    text_color = "white" if color == "#D50000" else "black"
+                    font_size = 11 if len(agent_str) < 10 else 9
+                    self.canvas.create_text(mid_x, mid_y, text=agent_str, fill=text_color, font=("Segoe UI", font_size, "bold"))
 
         self.canvas.create_text(700, 15, text=f"Time Step: {self.t}/{self.time_steps}", font=("Segoe UI", 12, "bold"))
+
+
 
     def next_step(self):
         if self.t >= self.time_steps:
@@ -232,39 +193,43 @@ class WirelessSimulatorApp:
                 for agent in range(self.num_agents):
                     band = random.randint(0, self.num_bands - 1)
                     self.occupancy[0][self.t][band].append(agent + 1)
-        elif self.selected_algo == "ML approach":
-            self.ml_approach()
         elif self.selected_algo == "RL approach":
             self.rl_approach()
 
         for b in range(self.num_bands):
             agents = self.occupancy[0][self.t][b]
             count = len(agents)
-            is_jammed = (b, self.t) in self.jammed_set
-            if is_jammed:
-                self.colors[b][self.t] = "#D50000"
-                if count > 0:
-                    self.collisions += 1
+            
+            if count == 0:
+                self.colors[b][self.t] = "#FFD600"  # yellow (empty)
+            elif count == 1:
+                self.colors[b][self.t] = "#00C853"  # bright green (success)
+                self.successful += 1
+                agent = agents[0] - 1
+                self.agent_success[agent] += 1
             else:
-                if count == 0:
-                    self.colors[b][self.t] = "#FFD600"  # yellow (empty)
-                elif count == 1:
-                    self.colors[b][self.t] = "#00C853"  # bright green (success)
-                    self.successful += 1
-                    agent = agents[0] - 1
-                    self.agent_success[agent] += 1
-                else:
-                    self.colors[b][self.t] = "#D50000"  # bright red (collision)
-                    self.collisions += 1
-        pprint.pprint(self.occupancy)
+                self.colors[b][self.t] = "#D50000"  # bright red (collision)
+                self.collisions += 1
+
+        #pprint.pprint(self.occupancy)
         self.t += 1
         self.draw_grid()
 
-    def ml_approach(self):
-        pass
+        if not hasattr(self, "throughput_history"):
+            self.throughput_history = []
+        current_successes = sum(1 for b in range(self.num_bands) if len(self.occupancy[0][self.t - 1][b]) == 1)
+        self.throughput_history.append(current_successes / self.num_bands)  # normalize per band
+
+
+
 
     def rl_approach(self):
-        pass
+        actions, rewards = self.env.step()
+        for agent, act in enumerate(actions):
+            if act < self.num_bands:
+                self.occupancy[0][self.t][act].append(agent + 1)
+
+
 
     def finish_simulation(self):
         total_slots = self.time_steps * self.num_bands
@@ -278,11 +243,57 @@ class WirelessSimulatorApp:
         text += f"Collisions: {self.collisions}   Successful: {self.successful}   Overall Throughput: {overall_throughput:.2f} ({self.successful}/{total_slots})\n"
         text += "Agent Throughputs: "
         for i, tp in enumerate(agent_throughputs, 1):
-            text += f"Agent{i}: {tp:.2f} "
+            text += f"{tp:.2f},  "
         text += f"\nJain's Fairness: {jain_fairness:.2f}"
         self.stats_label.config(text=text)
         self.play_button.config(state="disabled")
         self.next_button.config(state="disabled")
+
+        # Compute sliding window throughput
+        window = 15
+        if hasattr(self, "throughput_history") and len(self.throughput_history) > 0:
+            history = np.array(self.throughput_history)
+            kernel = np.ones(window) / window
+            sliding_avg = np.convolve(history, kernel, mode="valid")
+
+            # Create figure
+            fig, ax = plt.subplots(figsize=(8, 3))
+            ax.plot(sliding_avg, color="#2196F3", linewidth=1.5)
+            ax.set_title("Sliding-Window Throughput", fontsize=12)
+            ax.set_xlabel("Timestep")
+            ax.set_ylabel(f"Throughput (avg over {window})")
+            ax.grid(True, linestyle="--", alpha=0.5)
+            fig.tight_layout()
+
+            # --- Create a new toplevel window for the graph ---
+            plot_window = tk.Toplevel(self.master)
+            plot_window.title("Throughput Graph")
+
+            # Make window resizable & scrollable
+            canvas_container = tk.Canvas(plot_window)
+            canvas_container.pack(side="left", fill="both", expand=True)
+
+            y_scroll = tk.Scrollbar(plot_window, orient="vertical", command=canvas_container.yview)
+            y_scroll.pack(side="right", fill="y")
+            canvas_container.configure(yscrollcommand=y_scroll.set)
+
+            frame_inside = tk.Frame(canvas_container)
+            canvas_container.create_window((0, 0), window=frame_inside, anchor="nw")
+
+            # Embed Matplotlib figure
+            graph_canvas = FigureCanvasTkAgg(fig, master=frame_inside)
+            graph_canvas.draw()
+            graph_widget = graph_canvas.get_tk_widget()
+            graph_widget.pack(fill="both", expand=True, padx=10, pady=10)
+
+            # Update scrollregion dynamically
+            def _on_frame_configure(event):
+                canvas_container.configure(scrollregion=canvas_container.bbox("all"))
+
+            frame_inside.bind("<Configure>", _on_frame_configure)
+
+            # Set reasonable minimum window size
+            plot_window.geometry("900x400")
 
     def toggle_run(self):
         if not self.running:
@@ -299,6 +310,7 @@ class WirelessSimulatorApp:
         if self.t >= self.time_steps:
             self.running = False
             self.master.after(0, lambda: self.play_button.config(text="▶ Auto Run"))
+            self.finish_simulation()
 
 if __name__ == "__main__":
     root = tk.Tk()
