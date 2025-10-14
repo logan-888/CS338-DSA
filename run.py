@@ -3,9 +3,9 @@ from tkinter import ttk, messagebox
 import random
 import time
 import threading
-import pprint
 import math
 import numpy as np
+import matplotlib.pyplot as plt
 
 class WirelessSimulatorApp:
     def __init__(self, master):
@@ -150,6 +150,7 @@ class WirelessSimulatorApp:
         self.occupancy = np.zeros((self.time_steps, self.num_bands, self.num_agents), dtype=bool)
         self.colors = np.full((self.num_bands, self.time_steps), "#FFFFFF", dtype='<U7')
         self.agent_success = np.zeros(self.num_agents, dtype=int)
+        self.success_per_step = np.zeros(self.time_steps, dtype=int)
 
         # Pre-set jammed cells
         for band, ts in self.jammed_set:
@@ -244,6 +245,7 @@ class WirelessSimulatorApp:
                 elif count == 1:
                     self.colors[b, self.t] = "#00C853"  # bright green (success)
                     self.successful += 1
+                    self.success_per_step[self.t] += 1
                     agent = np.argwhere(self.occupancy[self.t, b])[0, 0]
                     self.agent_success[agent] += 1
                 else:
@@ -441,6 +443,16 @@ class WirelessSimulatorApp:
         if self.visual_enabled:
             self.play_button.config(state="disabled")
             self.next_button.config(state="disabled")
+
+        # Display throughput graph
+        throughput_per_step = self.success_per_step / self.num_bands
+        plt.figure(figsize=(10, 6))
+        plt.plot(range(self.time_steps), throughput_per_step)
+        plt.xlabel('Timestep')
+        plt.ylabel('Throughput (Successful / Bands)')
+        plt.title('Throughput per Timestep')
+        plt.grid(True)
+        plt.show()
 
     def toggle_run(self):
         if not self.running:
