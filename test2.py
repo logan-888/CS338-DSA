@@ -63,30 +63,12 @@ class WirelessSimulatorApp:
         self.prob_entry.grid(row=0, column=1, pady=5)
         self.prob_entry.insert(0, "50")
 
-        self.jammer_var = tk.BooleanVar(value=False)
-        self.jammer_check = ttk.Checkbutton(form, text="Enable Laser Jammer", variable=self.jammer_var, command=self.toggle_jammer_ui)
-        self.jammer_check.grid(row=6, column=0, columnspan=2, sticky="w", pady=5, padx=5)
-
-        self.jammer_frame = ttk.Frame(form)
-        ttk.Label(self.jammer_frame, text="Impacted Bands (1-10):").grid(row=0, column=0, sticky="e", pady=5, padx=5)
-        self.jammed_bands_entry = ttk.Entry(self.jammer_frame, width=10)
-        self.jammed_bands_entry.grid(row=0, column=1, pady=5)
-        self.jammed_bands_entry.insert(0, "1")
-
-        ttk.Label(self.jammer_frame, text="Impacted Time Steps:").grid(row=1, column=0, sticky="e", pady=5, padx=5)
-        self.jammed_times_entry = ttk.Entry(self.jammer_frame, width=10)
-        self.jammed_times_entry.grid(row=1, column=1, pady=5)
-        self.jammed_times_entry.insert(0, "1")
-
-        self.jammer_frame.grid_remove()
-
         self.visual_var = tk.BooleanVar(value=False)
         self.visual_check = ttk.Checkbutton(form, text="Disable Visual Mode", variable=self.visual_var)
-        self.visual_check.grid(row=8, column=0, columnspan=2, sticky="w", pady=5, padx=5)
+        self.visual_check.grid(row=5, column=0, columnspan=2, sticky="w", pady=5, padx=5)
 
         # Initial UI states
         self.toggle_prob_ui()
-        self.toggle_jammer_ui()
 
         ttk.Button(frame, text="Start Simulation", command=self.start_simulation).pack(pady=15)
 
@@ -95,12 +77,6 @@ class WirelessSimulatorApp:
             self.prob_frame.grid(row=5, column=0, columnspan=2, sticky="ew", pady=5)
         else:
             self.prob_frame.grid_remove()
-
-    def toggle_jammer_ui(self):
-        if self.jammer_var.get():
-            self.jammer_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=5)
-        else:
-            self.jammer_frame.grid_remove()
 
     def start_simulation(self):
         try:
@@ -129,21 +105,6 @@ class WirelessSimulatorApp:
         else:
             self.trans_prob = 1.0  # always transmit if not random
 
-        self.enable_jammer = self.jammer_var.get()
-        self.jammed_set = set()
-        if self.enable_jammer:
-            try:
-                num_jb = int(self.jammed_bands_entry.get())
-                num_jt = int(self.jammed_times_entry.get())
-                if not (1 <= num_jb <= self.num_bands and 1 <= num_jt <= self.time_steps):
-                    raise ValueError("Impacted values out of range.")
-                jammed_bands_list = random.sample(range(self.num_bands), num_jb)
-                jammed_times_list = random.sample(range(self.time_steps), num_jt)
-                self.jammed_set = {(band, ts) for band in jammed_bands_list for ts in jammed_times_list}
-            except ValueError as e:
-                messagebox.showerror("Input Error", str(e) if "out of range" in str(e) else "Invalid impacted values.")
-                return
-
         self.collisions = 0
         self.successful = 0
         self.t = 0
@@ -151,10 +112,8 @@ class WirelessSimulatorApp:
         self.colors = np.full((self.num_bands, self.time_steps), "#FFFFFF", dtype='<U7')
         self.agent_success = np.zeros(self.num_agents, dtype=int)
         self.success_per_step = np.zeros(self.time_steps, dtype=int)
-
-        # Pre-set jammed cells
-        for band, ts in self.jammed_set:
-            self.colors[band, ts] = "#D50000"
+        self.pending = np.zeros(self.num_agents, dtype=int)
+        self.arrival_prob = 0.05
 
         self.visual_enabled = not self.visual_var.get()
 
@@ -216,46 +175,44 @@ class WirelessSimulatorApp:
         self.draw_grid()
 
     def simulate_step(self):
+        # Packet arrivals
+        for agent in range(self.num_agents):
+            if random.random() < self.arrival_prob:
+                self.pending[agent] += 1
+
         # Agent transmissions based on selected algorithm
         if self.selected_algo == "Random":
-            if self.random_transmission:
-                for agent in range(self.num_agents):
-                    if random.random() < self.trans_prob:
+            for agent in range(self.num_agents):
+                if self.pending[agent] > 0:
+                    transmit = not self.random_transmission or random.random() < self.trans_prob
+                    if transmit:
                         band = np.random.randint(0, self.num_bands)
                         self.occupancy[self.t, band, agent] = True
-            else:
-                for agent in range(self.num_agents):
-                    band = np.random.randint(0, self.num_bands)
-                    self.occupancy[self.t, band, agent] = True
         elif self.selected_algo == "ML approach":
             self.ml_approach()
         elif self.selected_algo == "RL approach":
             self.rl_approach()
 
+        # Resolve transmissions
         for b in range(self.num_bands):
             count = np.sum(self.occupancy[self.t, b])
-            is_jammed = (b, self.t) in self.jammed_set
-            if is_jammed:
-                self.colors[b, self.t] = "#D50000"
-                if count > 0:
-                    self.collisions += 1
+            if count == 0:
+                self.colors[b, self.t] = "#FFFFFF"
+            elif count == 1:
+                agent = np.argwhere(self.occupancy[self.t, b])[0, 0]
+                self.colors[b, self.t] = "#00C853"  # bright green (success)
+                self.successful += 1
+                self.success_per_step[self.t] += 1
+                self.agent_success[agent] += 1
+                self.pending[agent] -= 1
+                # Update learning for success
+                if self.selected_algo == "ML approach":
+                    self.eg_rewards[agent, b] += 1.0
+                elif self.selected_algo == "RL approach":
+                    pass  # Exp3 updates before choice
             else:
-                if count == 0:
-                    self.colors[b, self.t] = "#FFD600"  # yellow (empty)
-                elif count == 1:
-                    self.colors[b, self.t] = "#00C853"  # bright green (success)
-                    self.successful += 1
-                    self.success_per_step[self.t] += 1
-                    agent = np.argwhere(self.occupancy[self.t, b])[0, 0]
-                    self.agent_success[agent] += 1
-                    # Update learning for success
-                    if self.selected_algo == "ML approach":
-                        self.eg_rewards[agent, b] += 1.0
-                    elif self.selected_algo == "RL approach":
-                        pass  # Exp3 updates before choice
-                else:
-                    self.colors[b, self.t] = "#D50000"  # bright red (collision)
-                    self.collisions += 1
+                self.colors[b, self.t] = "#D50000"  # bright red (collision)
+                self.collisions += count
 
     def draw_grid(self):
         self.canvas.delete("all")
@@ -272,19 +229,11 @@ class WirelessSimulatorApp:
                 mid_y = (y0 + y1) / 2
                 active_agents = np.where(self.occupancy[j, i])[0] + 1
                 agent_str = ",".join(map(str, active_agents)) if len(active_agents) > 0 else ""
-                is_jammed = (i, j) in self.jammed_set
 
-                if is_jammed:
-                    if len(active_agents) > 0:
-                        self.canvas.create_text(mid_x, mid_y - 6, text="JAMMED", fill="white", font=("Segoe UI", 10, "bold"))
-                        self.canvas.create_text(mid_x, mid_y + 6, text=agent_str, fill="white", font=("Segoe UI", 8))
-                    else:
-                        self.canvas.create_text(mid_x, mid_y, text="JAMMED", fill="white", font=("Segoe UI", 11, "bold"))
-                else:
-                    if len(active_agents) > 0:
-                        text_color = "white" if color == "#D50000" else "black"
-                        font_size = 11 if len(agent_str) < 10 else 9
-                        self.canvas.create_text(mid_x, mid_y, text=agent_str, fill=text_color, font=("Segoe UI", font_size, "bold"))
+                if len(active_agents) > 0:
+                    text_color = "white" if color == "#D50000" else "black"
+                    font_size = 11 if len(agent_str) < 10 else 9
+                    self.canvas.create_text(mid_x, mid_y, text=agent_str, fill=text_color, font=("Segoe UI", font_size, "bold"))
 
         self.canvas.create_text(700, 15, text=f"Time Step: {self.t}/{self.time_steps}", font=("Segoe UI", 12, "bold"))
 
@@ -301,18 +250,21 @@ class WirelessSimulatorApp:
 
     def ml_approach(self):
         """
-        Epsilon-Greedy with decaying epsilon for exploration.
+        Epsilon-Greedy with decaying epsilon for exploration (Level 1: Static Environment).
+        Actions include bands and idle to enable coordination like alternating.
         """
-        num_actions = self.num_bands + (1 if self.random_transmission else 0)
-        idle_idx = num_actions - 1 if self.random_transmission else -1
+        num_actions = self.num_bands + 1
+        idle_idx = num_actions - 1
 
         if not hasattr(self, "eg_plays"):
             self.eg_plays = np.zeros((self.num_agents, num_actions), dtype=int)
             self.eg_rewards = np.zeros((self.num_agents, num_actions), dtype=float)
 
-        eps = max(0.01, 1.0 / (self.t + 1))
+        eps = max(0.01, 1.0 / math.sqrt(self.t + 1))
 
         for agent in range(self.num_agents):
+            if self.pending[agent] == 0:
+                continue
             total_plays = np.sum(self.eg_plays[agent])
             if total_plays == 0:
                 action = np.random.randint(0, num_actions)
@@ -341,8 +293,8 @@ class WirelessSimulatorApp:
         gamma_decay = 0.999
         min_gamma = 0.03
 
-        num_actions = self.num_bands + (1 if self.random_transmission else 0)
-        idle_idx = num_actions - 1 if self.random_transmission else -1
+        num_actions = self.num_bands + 1
+        idle_idx = num_actions - 1
 
         if not hasattr(self, "exp3_state"):
             self.exp3_state = np.ones((self.num_agents, num_actions))
@@ -365,8 +317,7 @@ class WirelessSimulatorApp:
                     reward = 0.0
                 else:
                     count = np.sum(self.occupancy[self.t - 1, prev_action])
-                    is_jammed_prev = (prev_action, self.t - 1) in self.jammed_set
-                    reward = 1.0 if count == 1 and not is_jammed_prev else 0.0
+                    reward = 1.0 if count == 1 else 0.0
 
                 x_hat = reward / max(prob_action, 1e-12)
 
@@ -380,6 +331,9 @@ class WirelessSimulatorApp:
 
         # Choose actions for current timestep
         for agent in range(self.num_agents):
+            if self.pending[agent] == 0:
+                self.exp3_prev_actions[agent] = None
+                continue
             weights = self.exp3_state[agent]
             total_w = np.sum(weights)
             if total_w <= 0:
