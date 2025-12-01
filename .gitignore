@@ -1,1 +1,52 @@
+# .gitignore
+
+
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+
+# Virtual environments
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+pip-wheel-metadata/
+
+
+# IDEs / editors
 .idea/
+.vscode/
+
+
+# Test / coverage / lint
+.coverage
+.pytest_cache/
+htmlcov/
+.mypy_cache/
+
+
+# Logs / environment files
+*.log
+.env
+.env.*
+
+
+# Jupyter
+.ipynb_checkpoints/
+
+
+# macOS
+.DS_Store
+
+
+# Windows
+Thumbs.db

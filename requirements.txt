@@ -1,0 +1,17 @@
+# requirements.txt
+# Core runtime dependencies (pinned ranges for reproducibility)
+numpy>=1.24,<1.27
+torch>=2.0.1,<2.2.2
+matplotlib>=3.6,<4.0
+
+
+# Small useful typing helper for some torch versions / backports
+typing-extensions>=4.4
+
+
+# Optional / dev (uncomment if used)
+# pytest>=7.2,<8.0
+
+
+# Note: For CUDA-enabled PyTorch builds, install the appropriate wheel
+# from https://pytorch.org/ instead of the generic torch line above.
