@@ -39,6 +39,31 @@ This probabilistic rule introduces variability, preventing deterministic transmi
 
 ---
 
+## 🚀 How to Run the Simulation
+
+1. **Clone or download the repository from GitHub**  
+   Repository link: https://github.com/logan-888/CS338-DSA.git
+
+2. **Run the `requirements.txt` file**  
+   ```bash
+   pip install -r requirements.txt
+   
+3. **Choose your simulation mode**
+   - **For probabilistic packet generation**, enter the `updated_markov` folder.  
+   - **For constant packet transmissions**, enter the `constant_transmissions` folder.
+
+4. **Run the simulation**
+   ```bash
+   python simulation.py
+
+5. **Configure your parameters**  
+   When prompted, enter your simulation parameters and select the algorithm you want to test.
+
+6. **Begin the simulation**  
+   Click Begin to run the simulation and observe the results displayed on-screen.
+
+---
+
 ## 🧩 Configurable Parameters
 
 Users can adjust the following parameters to experiment with different network conditions:
@@ -75,7 +100,7 @@ The challenge:
 
 ---
 
-## 🚀 Example Use Cases
+## 🟢 Example Use Cases
 - Benchmarking adaptive MAC-layer algorithms.
 - Studying the effects of probabilistic transmission in distributed networks.
 - Teaching or research on decentralized wireless coordination.
